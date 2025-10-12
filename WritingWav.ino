@@ -9,10 +9,11 @@
 #define I2S_SD  32
 #define I2S_SCK 13
 #define SD_CS   15
+#define TRASH   2
 
-#define AUDIO_FILE        "/testaudio.wav"
+#define AUDIO_FILE        "/recording.wav"
 #define SAMPLE_RATE       16000
-#define BITS_PER_SAMPLE   8
+#define BITS_PER_SAMPLE   16
 #define GAIN_BOOSTER_I2S  32
 
 const char* ssid = "IgLights";
@@ -88,37 +89,24 @@ bool Recording_Loop() {
     DebugPrintln("> WAV header written, recording started...");
   }
 
-  if(flg_is_recording) {
-    int16_t audio_buffer[1024];
-    uint8_t audio_buffer_8bit[1024];
-    size_t bytes_read = 0;
+  int16_t audio_buffer[1024];
+  size_t bytes_read = 0;
+  i2s_channel_read(rx_handle, audio_buffer, sizeof(audio_buffer), &bytes_read, portMAX_DELAY);
+  size_t values_recorded = bytes_read / 2;
 
-    i2s_channel_read(rx_handle, audio_buffer, sizeof(audio_buffer), &bytes_read, portMAX_DELAY);
-    size_t values_recorded = bytes_read/2;
+  for(size_t i=0;i<values_recorded;i++) audio_buffer[i]*=GAIN_BOOSTER_I2S;
 
-    for(size_t i=0;i<values_recorded;i++) audio_buffer[i]*=GAIN_BOOSTER_I2S;
+  File audio_file = SD.open(AUDIO_FILE, FILE_APPEND);
+  audio_file.write((uint8_t*)audio_buffer, bytes_read);
+  audio_file.close();
 
-    if(BITS_PER_SAMPLE==8) {
-      for(size_t i=0;i<values_recorded;i++)
-        audio_buffer_8bit[i] = (uint8_t)(((audio_buffer[i]+32768)>>8)&0xFF);
-    }
-
-    File audio_file = SD.open(AUDIO_FILE, FILE_APPEND);
-    if(BITS_PER_SAMPLE==16) audio_file.write((uint8_t*)audio_buffer, bytes_read);
-    else audio_file.write(audio_buffer_8bit, values_recorded);
-    audio_file.close();
-  }
   return true;
 }
 
-bool Recording_Stop(String* audio_filename, uint8_t** buff_start, long* audiolength_bytes, float* audiolength_sec) {
+bool Recording_Stop(String* audio_filename, long* audiolength_bytes, float* audiolength_sec) {
   if(!flg_is_recording || !flg_I2S_initialized) return false;
 
   flg_is_recording = false;
-  *audio_filename = "";
-  *buff_start = NULL;
-  *audiolength_bytes = 0;
-  *audiolength_sec = 0;
 
   File audio_file = SD.open(AUDIO_FILE, "r+");
   long filesize = audio_file.size();
@@ -136,29 +124,40 @@ bool Recording_Stop(String* audio_filename, uint8_t** buff_start, long* audiolen
   return true;
 }
 
-void Send_WAV() {
-  if(WiFi.status()!=WL_CONNECTED) return;
+String Send_WAV(const String& filename) {
+  if(WiFi.status()!=WL_CONNECTED) return "";
 
-  File audioFile = SD.open(AUDIO_FILE);
-  if(!audioFile) return;
+  File audioFile = SD.open(filename);
+  if(!audioFile) return "";
 
   HTTPClient http;
   http.begin(serverURL);
   http.addHeader("Content-Type","audio/wav");
 
   int httpResponseCode = http.sendRequest("POST",&audioFile,audioFile.size());
-  if(httpResponseCode>0) DebugPrintln("HTTP Response: "+String(httpResponseCode));
-  else DebugPrintln("Error sending file: "+http.errorToString(httpResponseCode));
+  String serverResponse = "";
+
+  if(httpResponseCode > 0) {
+    serverResponse = http.getString();
+    DebugPrintln("HTTP Response: " + String(httpResponseCode));
+    DebugPrintln("Server says: " + serverResponse);
+  } else {
+    DebugPrintln("Error sending file: " + http.errorToString(httpResponseCode));
+  }
 
   http.end();
   audioFile.close();
+  return serverResponse;
 }
+
 
 // =================== SETUP ===================
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
+  pinMode(TRASH, OUTPUT);
+  digitalWrite(TRASH, LOW);
   WiFi.begin(ssid,password);
   Serial.println("Connecting to Wi-Fi...");
   while(WiFi.status()!=WL_CONNECTED) {
@@ -171,23 +170,48 @@ void setup() {
     Serial.println("I2S initialization failed!");
     while(true);
   }
-
-  DebugPrintln("Starting 5-second recording...");
-  unsigned long startMillis = millis();
-  while(millis()-startMillis<5000) Recording_Loop();
-
-  String filename;
-  uint8_t* buff_start = NULL;
-  long audiolength_bytes;
-  float audiolength_sec;
-  Recording_Stop(&filename,&buff_start,&audiolength_bytes,&audiolength_sec);
-
-  DebugPrintln("Sending WAV over Wi-Fi...");
-  Send_WAV();
-
-  Serial.println("Done. SD card safe to remove.");
 }
 
 void loop() {
-  // nothing, single record & send
+  while(true) {
+    // --- 5-second recording ---
+    unsigned long startMillis = millis();
+    while(millis() - startMillis < 5000) {
+      Recording_Loop();
+    }
+
+    // --- stop & finalize WAV ---
+    String filename;
+    long bytes;
+    float secs;
+    Recording_Stop(&filename, &bytes, &secs);
+
+    // --- send file and get recognized text ---
+    String recognized = Send_WAV(filename); // modify Send_WAV to return server response as String
+
+    recognized.toLowerCase(); // lowercase for easier comparison
+    //digitalWrite(TRASH, LOW);
+    // --- check for keywords ---
+    if(recognized.indexOf("weather") >= 0 ||
+       recognized.indexOf("time") >= 0 ||
+       recognized.indexOf("calendar") >= 0) {
+
+      digitalWrite(TRASH, LOW);
+      Serial.println("Keyword detected: " + recognized);
+      Serial.println("Pausing 10 seconds before next recording...");
+      delay(10000);  // pause 10 seconds
+    } else if (recognized.indexOf("trash") >= 0) {
+      Serial.println("Gathering TRASH");
+      digitalWrite(TRASH, HIGH);
+      delay(10000);
+      digitalWrite(TRASH, LOW);
+    } else {
+      digitalWrite(TRASH, LOW);
+      Serial.println("No keyword detected. Continuing...\n");
+    }
+  }
 }
+
+
+
+
