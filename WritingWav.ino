@@ -1,6 +1,12 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <SD.h>
+#include <ArduinoJson.h>
+#include <TFT_eSPI.h>
+#include <SPI.h>
+#include <FS.h>
+#include <JPEGDecoder.h>
+#include "time.h"
 #include "driver/i2s_std.h"
 
 // =================== CONFIG ===================
@@ -19,6 +25,32 @@
 const char* ssid = "IgLights";
 const char* password = "PolarBow";
 const char* serverURL = "http://192.168.0.170:5000/upload";
+
+// OpenWeatherMap API
+const char* city = "Lubbock";
+const char* apiKey = "fde8154ca85ad2aa561fc841b4bd4e25";
+
+// Time Setup
+const char* ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = -21600;
+const int daylightOffset_sec = 3600;
+
+// ======== Screen setup ========
+TFT_eSPI tft = TFT_eSPI();
+#define SCREEN_WIDTH 320
+#define SCREEN_HEIGHT 240
+
+// ======== Function Prototypes ========
+void drawTimeScreen();
+void drawWeatherScreen();
+void getWeather();
+void drawSdJpeg(const char *filename, int xpos, int ypos);
+void jpegRender(int xpos, int ypos);
+
+// ======== Weather data ========
+String weatherDesc = "";
+float weatherTemp = 0;
+String weatherMain = "";
 
 // Debug
 #ifndef DEBUG
@@ -69,7 +101,7 @@ bool I2S_Recording_Init() {
   i2s_channel_init_std_mode(rx_handle, &std_cfg);
   i2s_channel_enable(rx_handle);
 
-  if(!SD.begin(SD_CS)) {
+  if(!SD.begin(SD_CS, tft.getSPIinstance())) {
     Serial.println("SD mount failed!");
     return false;
   }
@@ -150,6 +182,225 @@ String Send_WAV(const String& filename) {
   return serverResponse;
 }
 
+// ================================================================
+//                      TIME FUNCTIONS
+// ================================================================
+void initTime() {
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+}
+
+String getTimeString() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    return "Time Error";
+  }
+  char buffer[20];
+  strftime(buffer, sizeof(buffer), "%I:%M", &timeinfo);
+  return String(buffer);
+}
+
+// ================================================================
+//                      WEATHER FUNCTIONS
+// ================================================================
+void getWeather() {
+  if (WiFi.status() != WL_CONNECTED) {
+    weatherDesc = "No WiFi";
+    weatherTemp = 0;
+    weatherMain = "";
+    return;
+  }
+
+  HTTPClient http;
+  String url = "https://api.openweathermap.org/data/2.5/weather?q=" + String(city) +
+               "&appid=" + String(apiKey) + "&units=imperial";
+
+  http.begin(url);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  int httpCode = http.GET();
+  Serial.println("HTTP code: " + String(httpCode));
+
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+
+    DynamicJsonDocument doc(4096);
+    DeserializationError error = deserializeJson(doc, payload);
+
+    if (error) {
+      Serial.print("JSON Error: ");
+      Serial.println(error.c_str());
+      weatherDesc = "Parse Error";
+      return;
+    }
+
+    weatherDesc = doc["weather"][0]["description"].as<String>();
+    weatherMain = doc["weather"][0]["main"].as<String>();
+    weatherTemp = doc["main"]["temp"].as<float>();
+  } else {
+    weatherDesc = "HTTP Error " + String(httpCode);
+  }
+  http.end();
+}
+
+// ================================================================
+//                      JPEG RENDERING
+// ================================================================
+void drawSdJpeg(const char *filename, int xpos, int ypos) {
+  File jpegFile = SD.open(filename, FILE_READ);
+  if (!jpegFile) {
+    Serial.print("ERROR: File \""); Serial.print(filename); Serial.println("\" not found!");
+    return;
+  }
+
+  bool decoded = JpegDec.decodeSdFile(jpegFile);
+  if (decoded) {
+    jpegRender(xpos, ypos);
+  } else {
+    Serial.println("Jpeg file format not supported!");
+  }
+}
+
+void jpegRender(int xpos, int ypos) {
+  uint16_t *pImg;
+  uint16_t mcu_w = JpegDec.MCUWidth;
+  uint16_t mcu_h = JpegDec.MCUHeight;
+  uint32_t max_x = JpegDec.width;
+  uint32_t max_y = JpegDec.height;
+
+  bool swapBytes = tft.getSwapBytes();
+  tft.setSwapBytes(true);
+
+  uint32_t min_w = mcu_w;
+  uint32_t min_h = mcu_h;
+
+  uint32_t win_w = mcu_w;
+  uint32_t win_h = mcu_h;
+
+  max_x += xpos;
+  max_y += ypos;
+
+  while (JpegDec.read()) {
+    pImg = JpegDec.pImage;
+    int mcu_x = JpegDec.MCUx * mcu_w + xpos;
+    int mcu_y = JpegDec.MCUy * mcu_h + ypos;
+
+    if (mcu_x + mcu_w <= max_x) win_w = mcu_w;
+    if (mcu_y + mcu_h <= max_y) win_h = mcu_h;
+
+    if ((mcu_x + win_w) <= tft.width() && (mcu_y + win_h) <= tft.height())
+      tft.pushImage(mcu_x, mcu_y, win_w, win_h, pImg);
+    else if ((mcu_y + win_h) >= tft.height())
+      JpegDec.abort();
+  }
+
+  tft.setSwapBytes(swapBytes);
+}
+
+// ================================================================
+//                      DISPLAY SCREENS
+// ================================================================
+void drawTimeScreen() {
+  tft.fillScreen(TFT_WHITE);
+  tft.setTextColor(TFT_BLACK, TFT_WHITE);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextSize(6);
+
+  String now = getTimeString();
+  tft.drawString(now, tft.width() / 2, tft.height() / 2);
+}
+
+const char* getIconForWeather(String mainWeather) {
+  mainWeather.toLowerCase();
+  if (mainWeather.indexOf("rain") >= 0) return "/rainy.jpg";
+  if (mainWeather.indexOf("cloud") >= 0) return "/cloudy.jpg";
+  if (mainWeather.indexOf("snow") >= 0) return "/snowy.jpg";
+  if (mainWeather.indexOf("clear") >= 0) return "/sunny.jpg";
+  if (mainWeather.indexOf("thunderstorm") >= 0) return "/thunderstorm.jpg";
+  return "/sunny.jpg"; // default
+}
+
+void drawWeatherScreen() {
+  tft.fillScreen(TFT_WHITE);
+  tft.setTextColor(TFT_BLACK, TFT_WHITE);
+  tft.setTextDatum(MC_DATUM);
+
+  // Temperature
+  tft.setTextSize(6);
+  String tempStr = String((int)weatherTemp) + "F";
+  int tempX = 110;
+  int tempY = tft.height() / 2 - 20;
+  tft.drawString(tempStr, tempX, tempY);
+
+  // Description
+  tft.setTextSize(3);
+  tft.drawString(weatherMain, tft.width() / 2, tft.height() / 2 + 40);
+
+  const char* iconFile = getIconForWeather(weatherMain);
+  int iconW = 128;
+  int iconH = 128;
+
+  // ======== ICON LOCATION ========
+  int iconX = (tft.width() - iconW - 8);   // horizontal centering
+  int iconY = 12;                          // distance from top
+  drawSdJpeg(getIconForWeather(weatherMain), iconX, iconY);
+}
+
+// Faces
+void drawListeningFace() {
+    // Screen center
+    int screenW = 320;
+    int screenH = 240;
+
+    // Eye size
+    int eyeW = 15;
+    int eyeH = 40;
+
+    // Mouth size
+    int mouthW = 50;
+    int mouthH = 10;
+
+    // Eyebrow size
+    int browW = 25;
+    int browH = 5;
+
+    // Positions (centered horizontally)
+    int faceCenterX = screenW / 2;
+
+    int leftEyeX = faceCenterX - 50;   // left eye
+    int rightEyeX = faceCenterX + 35;  // right eye
+    int eyeY = 80;
+
+    int mouthX = faceCenterX - mouthW / 2;
+    int mouthY = 150;
+
+    int leftBrowX = leftEyeX - 5;
+    int leftBrowY = eyeY - 20;  // raised higher
+    int rightBrowX = rightEyeX - 5;
+    int rightBrowY = eyeY - 10; // slightly lower than left
+
+    // Draw eyes
+    tft.fillRect(leftEyeX, eyeY, eyeW, eyeH, TFT_BLACK);
+    tft.fillRect(rightEyeX, eyeY, eyeW, eyeH, TFT_BLACK);
+
+    // Draw mouth
+    tft.fillRect(mouthX, mouthY, mouthW, mouthH, TFT_BLACK);
+
+    // Draw eyebrows
+    tft.fillRect(leftBrowX, leftBrowY, browW, browH, TFT_BLACK);
+    tft.fillRect(rightBrowX, rightBrowY, browW, browH, TFT_BLACK);
+}
+
+// =================== STATES ==================
+enum State {
+  LISTEN,
+  WEATHER,
+  TIME,
+  CALENDAR,
+  GTRASH,
+  IDLE
+};
+
+State currentState = LISTEN;
 
 // =================== SETUP ===================
 void setup() {
@@ -158,6 +409,7 @@ void setup() {
 
   pinMode(TRASH, OUTPUT);
   digitalWrite(TRASH, LOW);
+
   WiFi.begin(ssid,password);
   Serial.println("Connecting to Wi-Fi...");
   while(WiFi.status()!=WL_CONNECTED) {
@@ -166,48 +418,95 @@ void setup() {
   }
   Serial.println("\nWi-Fi connected: "+String(WiFi.localIP()));
 
+  tft.init();
+  tft.setRotation(3);
+  tft.fillScreen(TFT_WHITE);
+  tft.setTextColor(TFT_BLACK, TFT_WHITE);
+
   if(!I2S_Recording_Init()) {
     Serial.println("I2S initialization failed!");
     while(true);
   }
+
+  initTime();
+  getWeather();
 }
 
 void loop() {
-  while(true) {
-    // --- 5-second recording ---
-    unsigned long startMillis = millis();
-    while(millis() - startMillis < 5000) {
-      Recording_Loop();
+  switch (currentState) {
+    case LISTEN: 
+    {
+      tft.fillScreen(TFT_WHITE);
+      drawListeningFace();
+      
+      unsigned long startMillis = millis();
+      while (millis() - startMillis < 5000) {
+        Recording_Loop();
+      }
+
+      // Prevent corruption
+      String filename;
+      long bytes;
+      float secs;
+      Recording_Stop(&filename, &bytes, &secs);
+
+      // Send for recognition
+      String recognized = Send_WAV(filename);
+      recognized.toLowerCase();
+
+      Serial.println("Recognized: " + recognized);
+
+      // State stuff
+      if      (recognized.indexOf("weather")   >= 0) currentState = WEATHER;
+      else if (recognized.indexOf("time")      >= 0) currentState = TIME;
+      else if (recognized.indexOf("calendar")  >= 0) currentState = CALENDAR;
+      else if (recognized.indexOf("trash")     >= 0) currentState = GTRASH;
+      else currentState = IDLE;
+      break;
     }
 
-    // --- stop & finalize WAV ---
-    String filename;
-    long bytes;
-    float secs;
-    Recording_Stop(&filename, &bytes, &secs);
+    case WEATHER: 
+    {
+      Serial.println("Displaying weather...");
+      getWeather();
+      drawWeatherScreen();
+      delay(5000);
+      currentState = LISTEN;
+      break;
+    }
 
-    // --- send file and get recognized text ---
-    String recognized = Send_WAV(filename); // modify Send_WAV to return server response as String
+    case CALENDAR:
+    {
+      Serial.println("Displaying calendar...");
+      delay(5000);
+      currentState = LISTEN;
+      break;
+    }
 
-    recognized.toLowerCase(); // lowercase for easier comparison
-    //digitalWrite(TRASH, LOW);
-    // --- check for keywords ---
-    if(recognized.indexOf("weather") >= 0 ||
-       recognized.indexOf("time") >= 0 ||
-       recognized.indexOf("calendar") >= 0) {
+    case TIME:
+    {
+      Serial.println("Displaying time...");
+      drawTimeScreen();
+      delay(5000);
+      currentState = LISTEN;
+      break;
+    }
 
-      digitalWrite(TRASH, LOW);
-      Serial.println("Keyword detected: " + recognized);
-      Serial.println("Pausing 10 seconds before next recording...");
-      delay(10000);  // pause 10 seconds
-    } else if (recognized.indexOf("trash") >= 0) {
-      Serial.println("Gathering TRASH");
+    case GTRASH:
+    {
+      Serial.println("Getting trash...");
       digitalWrite(TRASH, HIGH);
-      delay(10000);
+      delay(5000);
       digitalWrite(TRASH, LOW);
-    } else {
-      digitalWrite(TRASH, LOW);
-      Serial.println("No keyword detected. Continuing...\n");
+      currentState = LISTEN;
+      break;
+    }
+    case IDLE:
+    {
+      Serial.println("No command detected, retrying...");
+      delay(1000);
+      currentState = LISTEN;
+      break;
     }
   }
 }
