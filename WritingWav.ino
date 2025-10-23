@@ -17,14 +17,14 @@
 #define SD_CS   15
 #define TRASH   2
 
-#define AUDIO_FILE        "/recording.wav"
+#define AUDIO_FILE        "/recording1.wav"
 #define SAMPLE_RATE       16000
 #define BITS_PER_SAMPLE   16
 #define GAIN_BOOSTER_I2S  32
 
-const char* ssid = "IgLights";
+const char* ssid = "IgLights";                         // "iPhone (1)"; // <- hotspot info
 const char* password = "PolarBow";
-const char* serverURL = "http://192.168.0.170:5000/upload";
+const char* serverURL = "http://192.168.0.170:5000/upload";// "http://172.20.10.3:5000/upload"; // <- hotspot info
 
 // OpenWeatherMap API
 const char* city = "Lubbock";
@@ -39,13 +39,6 @@ const int daylightOffset_sec = 3600;
 TFT_eSPI tft = TFT_eSPI();
 #define SCREEN_WIDTH 320
 #define SCREEN_HEIGHT 240
-
-// ======== Function Prototypes ========
-void drawTimeScreen();
-void drawWeatherScreen();
-void getWeather();
-void drawSdJpeg(const char *filename, int xpos, int ypos);
-void jpegRender(int xpos, int ypos);
 
 // ======== Weather data ========
 String weatherDesc = "";
@@ -105,6 +98,9 @@ bool I2S_Recording_Init() {
     Serial.println("SD mount failed!");
     return false;
   }
+  digitalWrite(TRASH, HIGH);
+  delay(500);
+  digitalWrite(TRASH, LOW);
   flg_I2S_initialized = true;
   return true;
 }
@@ -152,7 +148,7 @@ bool Recording_Stop(String* audio_filename, long* audiolength_bytes, float* audi
   *audiolength_bytes = filesize;
   *audiolength_sec = (float)((filesize-44) / SAMPLE_RATE * BITS_PER_SAMPLE/8);
 
-  DebugPrintln("> Recording finished. Bytes: "+String(*audiolength_bytes)+", sec: "+String(*audiolength_sec));
+  DebugPrintln("> Recording finished. Bytes: "+String(*audiolength_bytes)+", sec: "+String(*audiolength_sec/4));
   return true;
 }
 
@@ -397,10 +393,15 @@ enum State {
   TIME,
   CALENDAR,
   GTRASH,
-  IDLE
+  QUESTION
 };
 
 State currentState = LISTEN;
+
+// Task 1 code Listens
+void Listening( void * pvParameters) {
+  
+}
 
 // =================== SETUP ===================
 void setup() {
@@ -440,7 +441,7 @@ void loop() {
       drawListeningFace();
       
       unsigned long startMillis = millis();
-      while (millis() - startMillis < 5000) {
+      while (millis() - startMillis < 3000) {
         Recording_Loop();
       }
 
@@ -461,7 +462,8 @@ void loop() {
       else if (recognized.indexOf("time")      >= 0) currentState = TIME;
       else if (recognized.indexOf("calendar")  >= 0) currentState = CALENDAR;
       else if (recognized.indexOf("trash")     >= 0) currentState = GTRASH;
-      else currentState = IDLE;
+      else if (recognized.indexOf("question")  >= 0) currentState = QUESTION;
+      else currentState = LISTEN;
       break;
     }
 
@@ -501,10 +503,30 @@ void loop() {
       currentState = LISTEN;
       break;
     }
-    case IDLE:
+
+    case QUESTION:
     {
-      Serial.println("No command detected, retrying...");
-      delay(1000);
+      tft.fillScreen(TFT_WHITE);
+      drawListeningFace();
+      
+      unsigned long startMillis = millis();
+      while (millis() - startMillis < 10000) {
+        Recording_Loop();
+      }
+
+      // Prevent corruption
+      String filename;
+      long bytes;
+      float secs;
+      Recording_Stop(&filename, &bytes, &secs);
+
+      // Send for Gemini
+      String question = Send_WAV(filename);
+
+      Serial.println("Question recieved, answering...");
+
+      delay(5000);
+      // Return to listening
       currentState = LISTEN;
       break;
     }
