@@ -2,7 +2,7 @@ import os, ctypes, io, sys, calendar, threading
 from datetime import date
 from queue import Queue, Empty
 
-
+from google import genai
 from flask import Flask, request
 import speech_recognition as sr
 
@@ -19,10 +19,17 @@ except Exception:
 
 # Config 
 BASE_W, BASE_H = 2560, 1440  # Your design reference size
-ASSETS = r"C:\Users\tiny5\OneDrive\Desktop\Code_app\assets"
+ASSETS = r"C:\Users\thoma\Desktop\Projects\projects\Capstone Project Lab\assets" # Replace with asset PATH file location
 BG_PATH = os.path.join(ASSETS, "background.png")
 CARD_PATH = os.path.join(ASSETS, "title.png")   # your wide pill card art
 MASCOT_PATH = os.path.join(ASSETS, "mascot.png")
+
+# Gemini configuration
+API_KEY = "APIKEY" # Message Thomas for key
+client = genai.Client(api_key = API_KEY)
+questionflag = False
+last_transcript = None
+last_response = None
 
 #10-lesson path (toward tank control)
 LESSONS = {
@@ -439,11 +446,11 @@ def open_calendar():
 #Draw / Scale Scene (your logic preserved) 
 def draw_scene(event=None):
     card_hitboxes.clear()
-
-    # current window size
     w, h = root.winfo_width(), root.winfo_height()
+    if w <= 1 or h <= 1:
+        return  # skip initial 0-size events
 
-    # FILL background (crop if needed), high quality
+    # background scaling
     scale = max(w / bg_w, h / bg_h)
     new_size = (max(1, int(bg_w * scale)), max(1, int(bg_h * scale)))
     bg_scaled = bg_orig.resize(new_size, Image.LANCZOS)
@@ -528,14 +535,16 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 UPLOAD_PATH = os.path.join(UPLOAD_FOLDER, "recording.wav")
 
 # Add any words you want to react to
-KEYWORDS = ["lessons", "calendar", "sandbox", "weather", "time", "trash"]
+KEYWORDS = ["calendar", "question", "weather", "time", "trash"]
 
 @flask_app.route("/", methods=["GET"])
 def index():
     return "ESP32 Audio Upload Server Running!"
 
 @flask_app.route("/upload", methods=["POST"])
+
 def upload_audio():
+    global questionflag, last_transcript
     audio_data = request.data
     if not audio_data:
         return "No data received", 400
@@ -552,9 +561,18 @@ def upload_audio():
             print(f"[TRANSCRIPTION]: {text}")
 
             text_lower = text.lower()
+
+            if questionflag:
+                gemini_response(text_lower)
+                last_transcript = text
+                show_info()
+                questionflag = False
+
             for kw in KEYWORDS:
                 if kw in text_lower:
                     print(f"[KEYWORD DETECTED]: {kw}")
+                    if kw == "question":
+                        questionflag = True
                     voice_queue.put(kw)  # push to Tk
                     return kw, 200
 
@@ -565,35 +583,41 @@ def upload_audio():
     except sr.RequestError as e:
         return f"SpeechRecognition API error: {e}", 500
 
+def gemini_response(prompt):
+    global last_response
+    response = client.models.generate_content(
+        model="gemini-2.5-flash", contents= "Answer the question in a few words" + prompt
+    )
+    last_response = response.text
+    print(last_response)
+
 def run_flask():
     # threaded=True so multiple uploads don't block; no reloader to avoid extra processes
     flask_app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False, threaded=True)
 
 # ---------------- Voice → GUI Bridge ----------------
-def show_weather():
-    messagebox.showinfo("Weather", "Weather: (hook your weather logic here)")
-
 def show_time():
     from datetime import datetime
     messagebox.showinfo("Time", f"Current time: {datetime.now().strftime('%I:%M %p')}")
 
-def take_trash_action():
-    messagebox.showinfo("Trash", "Trash: (trigger servo / animation / cleanup action)")
+def show_info():
+    global last_transcript, last_response
+
+    answer_text = last_response
+    messagebox.showinfo(
+        "Question",
+        f"You asked: {last_transcript}\n\nAnswer: {answer_text}"
+    )
+
 
 def handle_keyword(kw: str):
     routing = {
-        "lessons": open_lessons,
         "calendar": open_calendar,
-        "sandbox": open_sandbox,
-        "weather": show_weather,
-        "time": show_time,
-        "trash": take_trash_action,
+        "question": show_info
     }
     cb = routing.get(kw)
     if cb:
         cb()
-    else:
-        messagebox.showinfo("Voice", f"Heard: {kw}")
 
 def poll_voice_events():
     try:
