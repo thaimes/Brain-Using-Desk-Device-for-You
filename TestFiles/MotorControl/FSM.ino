@@ -1,11 +1,13 @@
 #define LED_PIN 2
 #include<motor.h>
+#include<ir.h>
 
 bool trashWasPresent = false;
 
 enum mState {
     SEARCH,
     BACK,
+    TRASH,
     STOP
 };
 
@@ -15,6 +17,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   setupMotor();
+  void setupIR();
   Serial.begin(115200);  // USB to PC (uses GPIO1/3 internally)
   Serial2.begin(115200, SERIAL_8N1, 16, 17); // <-- RX2=16, TX2=17
   Serial.println("DEV READY: Listening...");
@@ -37,14 +40,17 @@ void loop() {
                     int start = msg.indexOf(":") + 1;
                     int end = msg.indexOf("}");
                     int x = msg.substring(start, end).toInt();
+                    
 
                     if (x <= 24) {
                         if (trashWasPresent) {
-                            stopMotors();
-                            currentState = STOP;
+                            Serial.println("Trash Checked");
+                            currentState = TRASH;
                         }
                         else {
+                            Serial.println("BACKUP");
                             moveBackward();
+                            trashWasPresent = true;
                             currentState = BACK;
                         }
                     } 
@@ -64,9 +70,22 @@ void loop() {
         }
         case BACK:
         {
-            trashWasPresent = true;
             delay(3000);
             currentState = SEARCH;
+            break;
+        }
+
+        case TRASH:
+        {
+            moveForward();
+            Serial.println("MOVE TO TABLE");
+            if(edge1sense &&  edge2sense){
+                stopMotors();
+                currentState = STOP; //change stop to return when time
+            }
+
+            currentState=TRASH;
+            
             break;
         }
 
