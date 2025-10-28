@@ -22,13 +22,13 @@
 #define BITS_PER_SAMPLE   16
 #define GAIN_BOOSTER_I2S  32
 
-const char* ssid = "IgLights";                         // "iPhone (1)"; // <- hotspot info
-const char* password = "PolarBow";
-const char* serverURL = "http://192.168.0.170:5000/upload";// "http://172.20.10.3:5000/upload"; // <- hotspot info
+const char* ssid = "*****";                         // "iPhone (1)"; // <- hotspot info
+const char* password = "******";
+const char* serverURL = "http://*********:5000/upload";// "http://172.20.10.3:5000/upload"; // <- hotspot info
 
 // OpenWeatherMap API
 const char* city = "Lubbock";
-const char* apiKey = "fde8154ca85ad2aa561fc841b4bd4e25";
+const char* apiKey = "***********************";
 
 // Time Setup
 const char* ntpServer = "pool.ntp.org";
