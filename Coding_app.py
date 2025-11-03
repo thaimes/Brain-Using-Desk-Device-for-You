@@ -19,7 +19,7 @@ except Exception:
 
 # Config 
 BASE_W, BASE_H = 2560, 1440  # Your design reference size
-ASSETS = r"C:\Users\thoma\Desktop\Projects\projects\Capstone Project Lab\assets" # Replace with asset PATH file location
+ASSETS = r"C:\Users\tiny5\OneDrive\Desktop\Code_app\assets" # Replace with asset PATH file location
 BG_PATH = os.path.join(ASSETS, "background.png")
 CARD_PATH = os.path.join(ASSETS, "title.png")   # your wide pill card art
 MASCOT_PATH = os.path.join(ASSETS, "mascot.png")
@@ -31,7 +31,11 @@ questionflag = False
 last_transcript = None
 last_response = None
 
+learning = False
+
 #10-lesson path (toward tank control)
+# Hide solutions (use scaffolds instead of solved starters)
+HIDE_ANSWERS = True
 LESSONS = {
     "01 • Say Hello": {
         "desc": "Print your first message. Change the text to make Python talk.",
@@ -297,7 +301,7 @@ def open_sandbox():
 
     tk.Label(win, text="Output", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=12)
     output = tk.Text(win, font=("Consolas", 13), height=10, bg="#0b0f14", fg="#e6edf3")
-    output.pack(fill="both", expand=False, padx=12, pady=(0, 12))
+    output.pack(fill="both", expand=False, padx=12, pady=(2,0))
 
     def run_code():
         code = editor.get("1.0", "end-1c")
@@ -315,10 +319,12 @@ def open_sandbox():
         output.insert("1.0", buf_out.getvalue() + (("\n" + buf_err.getvalue()) if buf_err.getvalue() else ""))
 
     row = tk.Frame(win); row.pack(pady=(0, 8))
-    tk.Button(row, text="Run ▶", font=("Segoe UI", 12, "bold"), command=run_code).grid(row=0, column=0, padx=6)
-    tk.Button(row, text="Clear", font=("Segoe UI", 12), command=lambda: output.delete("1.0","end")).grid(row=0, column=1, padx=6)
+    tk.Button(row, text="Run ▶", font=("Segoe UI", 12, "bold"), command=run_code).grid(row=10, column=0, padx=6)
+    tk.Button(row, text="Clear", font=("Segoe UI", 12), command=lambda: output.delete("1.0","end")).grid(row=10, column=1, padx=6)
 
 def open_lesson(lesson_key):
+    global learning
+    learning = True
     L = LESSONS[lesson_key]
     win = tk.Toplevel(root)
     win.title(lesson_key)
@@ -329,7 +335,9 @@ def open_lesson(lesson_key):
 
     editor = tk.Text(win, font=("Consolas", 14), height=16)
     editor.pack(fill="both", expand=True, padx=12, pady=8)
-    editor.insert("1.0", L["starter"])
+    starter_code = L["starter"] if not HIDE_ANSWERS else L.get("scaffold", "Code here")
+    editor.insert("1.0", starter_code)
+
 
     tk.Label(win, text="Output", font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=12)
     output = tk.Text(win, font=("Consolas", 13), height=8, bg="#0b0f14", fg="#e6edf3")
@@ -361,10 +369,13 @@ def open_lesson(lesson_key):
     row = tk.Frame(win); row.pack(pady=(0, 8))
     tk.Button(row, text="Run ▶", font=("Segoe UI", 12, "bold"), command=run_check).grid(row=0, column=0, padx=6)
     tk.Button(row, text="Reset", font=("Segoe UI", 12),
-              command=lambda: (editor.delete("1.0","end"), editor.insert("1.0", L["starter"]), output.delete("1.0","end"))
-              ).grid(row=0, column=1, padx=6)
+          command=lambda: (editor.delete("1.0","end"),
+                           editor.insert("1.0", L["starter"] if not HIDE_ANSWERS else L.get("scaffold", "# TODO")),
+                           output.delete("1.0","end"))
+          ).grid(row=0, column=1, padx=6)
 
 def open_lessons():
+    
     win = tk.Toplevel(root)
     win.title("Lessons")
     win.geometry("760x600")
@@ -544,9 +555,12 @@ def index():
 @flask_app.route("/upload", methods=["POST"])
 
 def upload_audio():
-    global questionflag, last_transcript
+    global questionflag, last_transcript, learning
     audio_data = request.data
-    if not audio_data:
+    if learning:
+        print("LEARNING MODE ON")
+        
+    elif not audio_data:
         return "No data received", 400
 
     with open(UPLOAD_PATH, "wb") as f:
