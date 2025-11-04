@@ -28,7 +28,7 @@ void setupMotor() {
 }
 
 //DC Motors
-void moveForward() {
+void moveBackward() {
   digitalWrite(IN1, HIGH); 
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, HIGH); 
@@ -36,7 +36,7 @@ void moveForward() {
   digitalWrite(ENA, HIGH);
    digitalWrite(ENB, HIGH);
 }
-void moveBackward() {
+void moveForward() {
   digitalWrite(IN1, LOW); 
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, LOW); 
@@ -77,14 +77,26 @@ void spinServoBackward() {
     servoTrash.write(0);    // return to home
 }
 
-void rotateMotors() {
+void rotateMotorsR() {
     // turn in place while searching for trash
     digitalWrite(IN1, HIGH); 
     digitalWrite(IN2, LOW);
     digitalWrite(IN3, LOW); 
     digitalWrite(IN4, HIGH);
     digitalWrite(ENA, HIGH);
+    digitalWrite(ENB, HIGH); 
+}
+
+void rotateMotorsL() {
+    // turn in place while searching for trash
+    digitalWrite(IN1, LOW); 
+    digitalWrite(IN2, HIGH);
+    digitalWrite(IN3, HIGH); 
+    digitalWrite(IN4, LOW);
+    digitalWrite(ENA, HIGH);
     digitalWrite(ENB, HIGH);
+    delay(1000);
+    
 }
 
 
