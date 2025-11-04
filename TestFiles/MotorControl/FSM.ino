@@ -1,6 +1,6 @@
 #define LED_PIN 2
-#include<motor.h>
-#include<ir.h>
+#include "motor.h"
+#include "ir.h"
 
 bool trashWasPresent = false;
 
@@ -17,7 +17,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   setupMotor();
-  void setupIR();
+  setupIR();
   Serial.begin(115200);  // USB to PC (uses GPIO1/3 internally)
   Serial2.begin(115200, SERIAL_8N1, 16, 17); // <-- RX2=16, TX2=17
   Serial.println("DEV READY: Listening...");
@@ -48,21 +48,24 @@ void loop() {
                             currentState = TRASH;
                         }
                         else {
+                            trashWasPresent = true;
                             Serial.println("BACKUP");
                             moveBackward();
-                            trashWasPresent = true;
                             currentState = BACK;
                         }
                     } 
                     else {
-                        Serial.println("START MOTOR");
+                        Serial.println("START MOTORS");
                         moveForward();
+                        delay(1000);
                         currentState = SEARCH;
                     }
                 }
                 else{
                     digitalWrite(LED_PIN, LOW);
-                    rotateMotors();
+                    rotateMotorsL();
+                    delay(1000);
+                    rotateMotorsR();
                     currentState = SEARCH;
                 }
                 break;
@@ -77,6 +80,7 @@ void loop() {
 
         case TRASH:
         {
+            //if (objectdetect)
             moveForward();
             Serial.println("MOVE TO TABLE");
             if(edge1sense &&  edge2sense){
