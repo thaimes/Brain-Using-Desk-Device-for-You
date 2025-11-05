@@ -19,7 +19,6 @@
 #define I2S_SD  32
 #define I2S_SCK 13
 #define SD_CS   15
-#define IN4     14
 #define TRASH   2
 
 #define AUDIO_FILE        "/recording1.wav"
@@ -27,9 +26,9 @@
 #define BITS_PER_SAMPLE   16
 #define GAIN_BOOSTER_I2S  32
 
-const char* ssid ="iPhone (1)"; // <- hotspot info
-const char* password = "PolarBow";
-const char* serverURL = "http://172.20.10.3:5000/upload"; // <- hotspot info
+const char* ssid ="***********"; // <- hotspot info
+const char* password = "***********";
+const char* serverURL = "http://***************/upload"; // <- hotspot info
 
 WebServer server(80);
 bool flag = false;
@@ -40,7 +39,7 @@ const long timeoutTime = 2000;
 
 // OpenWeatherMap API
 const char* city = "Lubbock";
-const char* apiKey = "API_KEY";
+const char* apiKey = "***************";
 
 // Time Setup
 const char* ntpServer = "pool.ntp.org";
@@ -423,9 +422,13 @@ void setup() {
   pinMode(TRASH, OUTPUT);
   digitalWrite(TRASH, LOW);
 
-  pinMode(IN4, OUTPUT);
-  digitalWrite(IN4, LOW);
+  //pinMode(IN4, OUTPUT);
+  //digitalWrite(IN4, LOW);
   Serial.println("MOTORS STOPPED");
+  setupMotor();
+  stopMotors();
+  Serial2.begin(115200, SERIAL_8N1, 16, 17); // RX2 = 16, TX2 = 17
+  Serial.println("DEV READY: Listening...");
 
   WiFi.begin(ssid,password);
   Serial.println("Connecting to Wi-Fi...");
@@ -560,6 +563,11 @@ void loop() {
       /* Add trash code in here 
          Extra movement states etc can be spread around
          Make sure that it can come out */
+      moveForward();
+
+      Serial.println("MOVING FORWARD 1 SEC");
+      delay(1000);
+      stopMotors();
 
       currentState = LISTEN;
       break;
