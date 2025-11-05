@@ -4,6 +4,7 @@ from queue import Queue, Empty
 
 from google import genai
 from flask import Flask, request
+import requests
 import speech_recognition as sr
 
 # ---- Tk / GUI ----
@@ -19,19 +20,22 @@ except Exception:
 
 # Config 
 BASE_W, BASE_H = 2560, 1440  # Your design reference size
-ASSETS = r"C:\Users\tiny5\OneDrive\Desktop\Code_app\assets" # Replace with asset PATH file location
+ASSETS = r"C:\Users\thoma\Desktop\Projects\projects\Capstone Project Lab\assets" # Replace with asset PATH file location
 BG_PATH = os.path.join(ASSETS, "background.png")
 CARD_PATH = os.path.join(ASSETS, "title.png")   # your wide pill card art
 MASCOT_PATH = os.path.join(ASSETS, "mascot.png")
 
 # Gemini configuration
-API_KEY = "APIKEY" # Message Thomas for key
+API_KEY = "API_KEY_HERE"
 client = genai.Client(api_key = API_KEY)
 questionflag = False
 last_transcript = None
 last_response = None
 
+# Global flask messages
 learning = False
+message_queue = Queue()
+BUDDY_IP = "http://172.20.10.11" # replace with BUDDY's IP
 
 #10-lesson path (toward tank control)
 # Hide solutions (use scaffolds instead of solved starters)
@@ -323,8 +327,6 @@ def open_sandbox():
     tk.Button(row, text="Clear", font=("Segoe UI", 12), command=lambda: output.delete("1.0","end")).grid(row=10, column=1, padx=6)
 
 def open_lesson(lesson_key):
-    global learning
-    learning = True
     L = LESSONS[lesson_key]
     win = tk.Toplevel(root)
     win.title(lesson_key)
@@ -375,10 +377,25 @@ def open_lesson(lesson_key):
           ).grid(row=0, column=1, padx=6)
 
 def open_lessons():
-    
     win = tk.Toplevel(root)
     win.title("Lessons")
     win.geometry("760x600")
+
+    try:
+        requests.get(f"{BUDDY_IP}/flag/on", timeout=2)
+        print("LEARN MODE ON")
+    except Exception as e:
+        print(f"Error sending flag on: {e}")
+
+    def on_close():
+        try:
+            requests.get(f"{BUDDY_IP}/flag/off", timeout=2)
+            print("LEARN MODE OFF")
+        except Exception as e:
+            print(f"Error sending flag off: {e}")
+        win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", on_close)
 
     tk.Label(win, text="Start here!The basics", font=("Segoe UI", 20)).pack(pady=(10, 6))
 
@@ -552,12 +569,13 @@ KEYWORDS = ["calendar", "question", "weather", "time", "trash"]
 def index():
     return "ESP32 Audio Upload Server Running!"
 
+
 @flask_app.route("/upload", methods=["POST"])
 
 def upload_audio():
     global questionflag, last_transcript, learning
     audio_data = request.data
-    if learning:
+    if learning == True:
         print("LEARNING MODE ON")
         
     elif not audio_data:
