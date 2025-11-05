@@ -1,5 +1,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WiFi.h>
+#include <WebServer.h>
 #include <SD.h>
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
@@ -9,6 +11,7 @@
 #include "time.h"
 #include <motor.h>
 #include "driver/i2s_std.h"
+
 
 // =================== CONFIG ===================
 #define I2S_LR  LOW
@@ -24,13 +27,20 @@
 #define BITS_PER_SAMPLE   16
 #define GAIN_BOOSTER_I2S  32
 
-const char* ssid ="*******"; // <- hotspot info
-const char* password = "*******";
-const char* serverURL = "http://*******:5000/upload"; // <- hotspot info
+const char* ssid ="iPhone (1)"; // <- hotspot info
+const char* password = "PolarBow";
+const char* serverURL = "http://172.20.10.3:5000/upload"; // <- hotspot info
+
+WebServer server(80);
+bool flag = false;
+
+unsigned long currentTime = millis();
+unsigned long previousTime = 0;
+const long timeoutTime = 2000;
 
 // OpenWeatherMap API
 const char* city = "Lubbock";
-const char* apiKey = "************";
+const char* apiKey = "API_KEY";
 
 // Time Setup
 const char* ntpServer = "pool.ntp.org";
@@ -187,6 +197,7 @@ String Send_WAV(const String& filename) {
   audioFile.close();
   return serverResponse;
 }
+
 
 // ================================================================
 //                      TIME FUNCTIONS
@@ -377,8 +388,21 @@ void drawFaceScreen(const char* faceFile) {
   jpegFile.close();
 }
 
+void handleFlagOn() {
+  flag = true;
+  server.send(200, "text/plain", "Flag set ON");
+  Serial.println("LEARNING MODE ON");
+}
+
+void handleFlagOff() {
+  flag = false;
+  server.send(200, "text/plain", "Flag set OFF");
+  Serial.println("LEARNING MODE OFF");
+}
+
 // =================== STATES ==================
 enum State {
+  IDLE,
   LISTEN,
   WEATHER,
   TIME,
@@ -387,12 +411,9 @@ enum State {
   QUESTION
 };
 
-State currentState = LISTEN;
+State currentState = IDLE;
+int lastState = -1;
 
-// Task 1 code Listens
-void Listening( void * pvParameters) {
-  
-}
 
 // =================== SETUP ===================
 void setup() {
@@ -412,12 +433,18 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWi-Fi connected: "+String(WiFi.localIP()));
+  Serial.println("\nConnected to WiFi");
+  Serial.println(WiFi.localIP());
+
+  server.on("/flag/on", handleFlagOn);
+  server.on("/flag/off", handleFlagOff);
+  server.begin();
+  Serial.println("Server started");
 
   tft.init();
-  tft.setRotation(3);
+  tft.setRotation(1);
   tft.fillScreen(TFT_WHITE);
-  tft.setTextColor(TFT_BLACK, TFT_WHITE);
+  //tft.setTextColor(TFT_BLACK, TFT_WHITE);
 
   if(!I2S_Recording_Init()) {
     Serial.println("I2S initialization failed!");
@@ -429,12 +456,50 @@ void setup() {
 }
 
 void loop() {
+  server.handleClient();
+
+  if (currentState != lastState) {
+    tft.fillScreen(TFT_WHITE);
+
+    switch (currentState) {
+      case IDLE:
+      {
+        drawFaceScreen(FACE_IDLE);
+        break;
+      }
+      case WEATHER:
+      {
+        drawWeatherScreen();
+        break;
+      }
+      case TIME:
+      {
+        drawTimeScreen();
+        break;
+      }
+      case QUESTION:
+      {
+        drawFaceScreen(FACE_QUESTION);
+        break;
+      }
+    }
+    lastState = currentState;
+  }
   switch (currentState) {
-    case LISTEN: 
+    case IDLE:
     {
-      tft.fillScreen(TFT_WHITE);
+      if (!flag) currentState = LISTEN;
+      break;
+    }
+    case LISTEN: 
+    {  
+      if (flag) {
+        currentState = IDLE;
+        break;
+      }
+
       drawFaceScreen(FACE_LISTENING);
-      
+
       unsigned long startMillis = millis();
       while (millis() - startMillis < 3000) {
         Recording_Loop();
@@ -462,9 +527,6 @@ void loop() {
         else if (recognized.indexOf("question")  >= 0) currentState = QUESTION;
         else currentState = LISTEN;
       }
-      else {
-        currentState = LISTEN;
-      }
       break;
     }
 
@@ -472,7 +534,6 @@ void loop() {
     {
       Serial.println("Displaying weather...");
       getWeather();
-      drawWeatherScreen();
       delay(5000);
       currentState = LISTEN;
       break;
@@ -489,7 +550,6 @@ void loop() {
     case TIME:
     {
       Serial.println("Displaying time...");
-      drawTimeScreen();
       delay(5000);
       currentState = LISTEN;
       break;
@@ -497,19 +557,16 @@ void loop() {
 
     case GTRASH:
     {
-      Serial.println("Getting trash...");
-      digitalWrite(TRASH, HIGH);
-      delay(5000);
-      digitalWrite(TRASH, LOW);
+      /* Add trash code in here 
+         Extra movement states etc can be spread around
+         Make sure that it can come out */
+
       currentState = LISTEN;
       break;
     }
 
     case QUESTION:
     {
-      tft.fillScreen(TFT_WHITE);
-      drawFaceScreen(FACE_QUESTION);
-      
       unsigned long startMillis = millis();
       while (millis() - startMillis < 5000) {
         Recording_Loop();
