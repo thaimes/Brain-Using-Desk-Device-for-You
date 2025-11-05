@@ -1,7 +1,7 @@
-import os, ctypes, io, sys, calendar, threading
-from datetime import date
+import os, ctypes, io, sys, calendar, threading,json
+from datetime import date, datetime
 from queue import Queue, Empty
-
+from pathlib import Path
 from google import genai
 from flask import Flask, request
 import requests
@@ -17,10 +17,10 @@ try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)   # Per-monitor DPI aware
 except Exception:
     pass
-
+NOTES_PATH = Path("calendar_notes.json")  # save next to your script
 # Config 
 BASE_W, BASE_H = 2560, 1440  # Your design reference size
-ASSETS = r"C:\Users\thoma\Desktop\Projects\projects\Capstone Project Lab\assets" # Replace with asset PATH file location
+ASSETS = r"C:\Users\tiny5\OneDrive\Desktop\Code_app\assets" # Replace with asset PATH file location
 BG_PATH = os.path.join(ASSETS, "background.png")
 CARD_PATH = os.path.join(ASSETS, "title.png")   # your wide pill card art
 MASCOT_PATH = os.path.join(ASSETS, "mascot.png")
@@ -42,7 +42,7 @@ BUDDY_IP = "http://172.20.10.11" # replace with BUDDY's IP
 HIDE_ANSWERS = True
 LESSONS = {
     "01 • Say Hello": {
-        "desc": "Print your first message. Change the text to make Python talk.",
+        "desc": "Print your first message. Make python say Hello world.",
         "starter": "print('Hello, world!')",
         "check": lambda out: 'Hello' in out,
         "success": "Nice! Your program talked 🎉",
@@ -337,7 +337,7 @@ def open_lesson(lesson_key):
 
     editor = tk.Text(win, font=("Consolas", 14), height=16)
     editor.pack(fill="both", expand=True, padx=12, pady=8)
-    starter_code = L["starter"] if not HIDE_ANSWERS else L.get("scaffold", "Code here")
+    starter_code = L["starter"] if not HIDE_ANSWERS else L.get("scaffold", "#Code here")
     editor.insert("1.0", starter_code)
 
 
@@ -418,12 +418,33 @@ def open_lessons():
                   command=lambda n=name: open_lesson(n)).pack(anchor="e", pady=(2, 0))
 
 def open_calendar():
+    # --- helpers for persistence ---
+    def load_notes():
+        if NOTES_PATH.exists():
+            try:
+                raw = json.load(NOTES_PATH.open("r", encoding="utf-8"))
+                # convert {"YYYY-MM-DD": "text"} -> {date(...): "text"}
+                return {date.fromisoformat(k): v for k, v in raw.items() if v.strip()}
+            except Exception:
+                return {}
+        return {}
+
+    def save_notes():
+        try:
+            # convert {date(...): "text"} -> {"YYYY-MM-DD": "text"}
+            raw = {k.isoformat(): v for k, v in notes.items() if v.strip()}
+            json.dump(raw, NOTES_PATH.open("w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        except Exception:
+            # fail silently; you could log/print if you prefer
+            pass
+
     win = tk.Toplevel(root)
     win.title("Calendar")
     win.geometry("640x560")
 
     cur = {"y": date.today().year, "m": date.today().month}
-    notes = {}
+    notes = load_notes()
+
     header = tk.Frame(win); header.pack(fill="x", pady=(8,4))
     btn_prev = tk.Button(header, text="◀", width=3)
     btn_next = tk.Button(header, text="▶", width=3)
@@ -451,9 +472,12 @@ def open_calendar():
                     tk.Label(top, text=f"{dd:%A, %B %d}", font=("Segoe UI", 14, "bold")).pack(pady=(10,4))
                     ent = tk.Text(top, width=40, height=6); ent.pack(padx=10, pady=10)
                     if dd in notes: ent.insert("1.0", notes[dd])
+
                     def save_note():
                         notes[dd] = ent.get("1.0","end-1c").strip()
+                        save_notes()   # save immediately
                         top.destroy(); rebuild()
+
                     tk.Button(top, text="Save", command=save_note).pack(pady=(0,10))
                 btn.configure(command=on_day)
             r += 1
@@ -468,9 +492,17 @@ def open_calendar():
         if cur["m"] == 12: cur["m"] = 1; cur["y"] += 1
         else: cur["m"] += 1
         rebuild()
-    btn_prev.config(command=prev_month); btn_next.config(command=next_month)
-    rebuild()
 
+    # Save when the calendar window is closed via the [X]
+    def on_close():
+        save_notes()
+        win.destroy()
+
+    btn_prev.config(command=prev_month); btn_next.config(command=next_month)
+    win.protocol("WM_DELETE_WINDOW", on_close)
+
+    rebuild()
+    
 #Draw / Scale Scene (your logic preserved) 
 def draw_scene(event=None):
     card_hitboxes.clear()
