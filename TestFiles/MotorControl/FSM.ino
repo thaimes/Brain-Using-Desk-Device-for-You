@@ -80,12 +80,17 @@ void loop() {
 
         case TRASH:
         {
-            //if (objectdetect)
+            
+            //if (objectDetected()){
+            //Code for making sure middle ir on for trash
+            //}
+
             moveForward();
             Serial.println("MOVE TO TABLE");
-            if(edge1sense &&  edge2sense){
+
+            if(edgeDetected()){ //when both edge sensors on 
                 stopMotors();
-                currentState = STOP; //change stop to return when time
+                currentState = STOP;
             }
 
             currentState=TRASH;
