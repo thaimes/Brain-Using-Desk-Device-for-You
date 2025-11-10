@@ -1,28 +1,51 @@
-int led=2;                   //LED to digital pin 7  
-int senRead=35;                 //Readings from sensor to analog pin 0  
-int limit = 2000;            // play with system to find this limit (10K ohm resistor used)
-void setup()    
- {  
-  pinMode(led,OUTPUT);  
-  digitalWrite(led, HIGH);
-  delay(500);
-  digitalWrite(led,LOW);      // LED initially off  
-  Serial.begin(9600);         
- }  
+const int irPin1 = 35;  // Front
+const int irPin2 = 34;  // Edge sensor
+const int irPin3 = 39;  // Edge sensor
 
-int val = 0;
-void loop()  
- {  
-  val=analogRead(senRead);  //photodiode reading
-  Serial.println(val);      
-  if(val <= limit)             // NO OBSTICLE 
-  {  
-   digitalWrite(led,LOW);     // LED OFF
-   delay(20);  
-  }  
-  else if(val > limit)        // OBSTICLE DETECTED  
-  {  
-   digitalWrite(led,HIGH);      //LED ON
-   delay(20);  
-  }  
- }  
+int irThreshold1 = 700;
+int irThreshold2 = 700;
+int irThreshold3 = 700;
+
+bool sensor1Detected = false;
+bool sensor2Detected = false;
+bool sensor3Detected = false;
+
+void setupDistance() {
+  pinMode(irPin1, INPUT);
+  pinMode(irPin2, INPUT);
+  pinMode(irPin3, INPUT);
+  Serial.println("IR sensors initialized.");
+}
+
+// === Update Sensor States ===
+void updateDistanceSensors() {
+  int val1 = analogRead(irPin1);
+  int val2 = analogRead(irPin2);
+  int val3 = analogRead(irPin3);
+
+  // Update detection flags
+  sensor1Detected = (val1 < irThreshold1);  // Object
+  sensor2Detected = (val2 < irThreshold2);  // Left edge
+  sensor3Detected = (val3 < irThreshold3);  // Right edge
+
+  // For debugging
+  Serial.print("IR1: "); Serial.print(val1);
+  Serial.print(" | IR2: "); Serial.print(val2);
+  Serial.print(" | IR3: "); Serial.println(val3);
+}
+
+// Front Object Detection
+bool objectDetected() {
+  return sensor1Detected;
+}
+
+//Edge Detection
+bool edgeDetected() {
+  return (sensor2Detected && sensor3Detected);
+}
+
+//Any Edge Triggered (Debug)
+bool anyEdgeDetected() {
+  return (sensor2Detected || sensor3Detected);
+}
+
