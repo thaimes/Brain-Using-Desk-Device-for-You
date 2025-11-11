@@ -19,19 +19,27 @@
 #define I2S_SD  32
 #define I2S_SCK 13
 #define SD_CS   15
-#define TRASH   2
+#define LED_PIN 2
 
 #define AUDIO_FILE        "/recording1.wav"
 #define SAMPLE_RATE       16000
 #define BITS_PER_SAMPLE   16
 #define GAIN_BOOSTER_I2S  32
 
-const char* ssid ="***********"; // <- hotspot info
-const char* password = "***********";
-const char* serverURL = "http://***************/upload"; // <- hotspot info
+const int IRC = 39;
+const int IRL = 35;
+const int IRR = 34;
+
+const char* ssid ="**************"; // <- hotspot info
+const char* password = "*************";
+const char* serverURL = "http://************:5000/upload"; // <- hotspot info
 
 WebServer server(80);
 bool flag = false;
+bool trashWasPresent = false;
+int sweepCnt = 0;
+int Lcnt = 0;
+int Rcnt = 0;
 
 unsigned long currentTime = millis();
 unsigned long previousTime = 0;
@@ -39,7 +47,7 @@ const long timeoutTime = 2000;
 
 // OpenWeatherMap API
 const char* city = "Lubbock";
-const char* apiKey = "***************";
+const char* apiKey = "*****************";
 
 // Time Setup
 const char* ntpServer = "pool.ntp.org";
@@ -58,6 +66,7 @@ const char* FACE_CORRECT    = "/right_ans.jpg";
 const char* FACE_QUESTION   = "/question.jpg";
 const char* FACE_QUESTION1  = "/question1.jpg";
 const char* FACE_QUESTION2  = "/question2.jpg";
+const char* FACE_TRASH      = "/trash.jpg";
 
 // ======== Weather data ========
 String weatherDesc = "";
@@ -117,9 +126,9 @@ bool I2S_Recording_Init() {
     Serial.println("SD mount failed!");
     return false;
   }
-  digitalWrite(TRASH, HIGH);
+  digitalWrite(LED_PIN, HIGH);
   delay(500);
-  digitalWrite(TRASH, LOW);
+  digitalWrite(LED_PIN, LOW);
   flg_I2S_initialized = true;
   return true;
 }
@@ -406,7 +415,9 @@ enum State {
   WEATHER,
   TIME,
   CALENDAR,
-  GTRASH,
+  SEARCH,
+  TRASH,
+  STOP,
   QUESTION
 };
 
@@ -419,8 +430,8 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  pinMode(TRASH, OUTPUT);
-  digitalWrite(TRASH, LOW);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
   //pinMode(IN4, OUTPUT);
   //digitalWrite(IN4, LOW);
@@ -480,6 +491,11 @@ void loop() {
         drawTimeScreen();
         break;
       }
+      case SEARCH:
+      {
+        drawFaceScreen(FACE_TRASH);
+        break;
+      }
       case QUESTION:
       {
         drawFaceScreen(FACE_QUESTION);
@@ -501,6 +517,9 @@ void loop() {
         break;
       }
 
+      sweepCnt = 0;
+      Lcnt = 0;
+      Rcnt = 0;
       drawFaceScreen(FACE_LISTENING);
 
       unsigned long startMillis = millis();
@@ -523,11 +542,12 @@ void loop() {
         Serial.println("Recognized: " + recognized);
 
         // State stuff
-        if      (recognized.indexOf("weather")   >= 0) currentState = WEATHER;
-        else if (recognized.indexOf("time")      >= 0) currentState = TIME;
-        else if (recognized.indexOf("calendar")  >= 0) currentState = CALENDAR;
-        else if (recognized.indexOf("trash")     >= 0) currentState = GTRASH;
-        else if (recognized.indexOf("question")  >= 0) currentState = QUESTION;
+        if      (recognized.indexOf("weather")  >= 0) currentState = WEATHER;
+        else if (recognized.indexOf("time")     >= 0) currentState = TIME;
+        else if (recognized.indexOf("calendar") >= 0) currentState = CALENDAR;
+        else if (recognized.indexOf("trash")    >= 0) currentState = SEARCH;
+        else if (recognized.indexOf("garbage")  >= 0) currentState = SEARCH;
+        else if (recognized.indexOf("question") >= 0) currentState = QUESTION;
         else currentState = LISTEN;
       }
       break;
@@ -558,17 +578,94 @@ void loop() {
       break;
     }
 
-    case GTRASH:
+    case SEARCH:
     {
       /* Add trash code in here 
          Extra movement states etc can be spread around
          Make sure that it can come out */
+
+      if (Serial2.available()) {
+        String msg = Serial2.readStringUntil('\n');
+        msg.trim();
+        Serial.print("FROM CAM: "); 
+        Serial.println(msg);
+        if (msg.startsWith("{\"trash\":")) {
+            digitalWrite(LED_PIN, HIGH);
+            Serial.println("TRASH APPEARED");
+            //spinServoForward();
+
+            int start = msg.indexOf(":") + 1;
+            int end = msg.indexOf("}");
+            int x = msg.substring(start, end).toInt();
+
+            Serial.println("START MOTORS");
+            currentState = TRASH;
+        }
+        else{
+            digitalWrite(LED_PIN, LOW);
+            /*
+            rotateMotorsL();
+            delay(1000);
+            rotateMotorsR();
+            delay(2000);
+            rotateMotorsL();
+            delay(1000);
+            */
+
+            // Skip both if Lcnt > 3 and Rcnt > 5
+            // Turn left 3 times
+            if (Lcnt < 3) {
+              rotateMotorsL();
+              delay(250);
+              stopMotors();
+              Lcnt++; // Increment turn left count
+              currentState = SEARCH;
+              break;
+            }
+            // Turn right 4 times
+            if (Rcnt < 5) {
+              rotateMotorsR();
+              delay(250);
+              stopMotors();
+              Rcnt++; // Increment turn right count
+              currentState = SEARCH;
+              break;
+            }
+            // This might break here...
+            // Increment sweep only once Lcnt > 3 and Rcnt > 5 meaning full sweep
+            sweepCnt++;
+            // Reset position
+            rotateMotorsL();
+            delay(750);
+            stopMotors();
+
+            if (sweepCnt == 5) {
+              Rcnt = 0;
+              Lcnt = 0;
+              currentState = STOP;
+            }
+            else {
+              currentState = SEARCH;
+            }
+        }
+
+      break;
+      }
+    }
+
+    case TRASH:
+    {
       moveForward();
+      Serial.println("MOVE FORWARD 3 SEC");
+      delay(3000);
+      
+      currentState = STOP;
+      break;
+    }
 
-      Serial.println("MOVING FORWARD 1 SEC");
-      delay(1000);
+    case STOP:
+    {
       stopMotors();
-
       currentState = LISTEN;
       break;
     }
@@ -599,6 +696,7 @@ void loop() {
     }
   }
 }
+
 
 
 
