@@ -20,7 +20,7 @@ except Exception:
 
 # Config 
 BASE_W, BASE_H = 2560, 1440  # Your design reference size
-ASSETS = r"PATH_TO_ASSETS" # Replace with asset PATH file location
+ASSETS = r"C:\Users\tiny5\OneDrive\Desktop\Code_app\assets" # Replace with asset PATH file location
 BG_PATH = os.path.join(ASSETS, "background.png")
 CARD_PATH = os.path.join(ASSETS, "title.png")   # your wide pill card art
 MASCOT_PATH = os.path.join(ASSETS, "mascot.png")
@@ -42,7 +42,7 @@ BUDDY_IP = "http://BUDDY_IP" # replace with BUDDY's IP
 HIDE_ANSWERS = True
 LESSONS = {
     "01 • Say Hello": {
-        "desc": "Print your first message. Change the text to make Python talk.",
+        "desc": "Make python say Hello, world!.",
         "starter": "print('Hello, world!')",
         "check": lambda out: 'Hello' in out,
         "success": "Nice! Your program talked 🎉",
@@ -337,7 +337,7 @@ def open_lesson(lesson_key):
 
     editor = tk.Text(win, font=("Consolas", 14), height=16)
     editor.pack(fill="both", expand=True, padx=12, pady=8)
-    starter_code = L["starter"] if not HIDE_ANSWERS else L.get("scaffold", "Code here")
+    starter_code = L["starter"] if not HIDE_ANSWERS else L.get("scaffold", "#Code here")
     editor.insert("1.0", starter_code)
 
 
@@ -365,8 +365,11 @@ def open_lesson(lesson_key):
         try:
             if L["check"](out):
                 messagebox.showinfo("Great job!", L["success"])
+                #Close this lesson window and return to the lessons list
+                win.destroy()
         except Exception:
             pass
+
 
     row = tk.Frame(win); row.pack(pady=(0, 8))
     tk.Button(row, text="Run ▶", font=("Segoe UI", 12, "bold"), command=run_check).grid(row=0, column=0, padx=6)
