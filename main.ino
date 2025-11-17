@@ -10,6 +10,7 @@
 #include <JPEGDecoder.h>
 #include "time.h"
 #include <motor.h>
+#include <IR.h>
 #include "driver/i2s_std.h"
 
 
@@ -26,13 +27,9 @@
 #define BITS_PER_SAMPLE   16
 #define GAIN_BOOSTER_I2S  32
 
-const int IRC = 39;
-const int IRL = 35;
-const int IRR = 34;
-
-const char* ssid ="**************"; // <- hotspot info
-const char* password = "*************";
-const char* serverURL = "http://************:5000/upload"; // <- hotspot info
+const char* ssid ="iPhone (1)"; // <- hotspot info
+const char* password = "*********";
+const char* serverURL = "http://***********:5000/upload"; // <- hotspot info
 
 WebServer server(80);
 bool flag = false;
@@ -47,7 +44,7 @@ const long timeoutTime = 2000;
 
 // OpenWeatherMap API
 const char* city = "Lubbock";
-const char* apiKey = "*****************";
+const char* apiKey = "**********************";
 
 // Time Setup
 const char* ntpServer = "pool.ntp.org";
@@ -417,6 +414,7 @@ enum State {
   CALENDAR,
   SEARCH,
   TRASH,
+  EDGE,
   STOP,
   QUESTION
 };
@@ -436,6 +434,7 @@ void setup() {
   //pinMode(IN4, OUTPUT);
   //digitalWrite(IN4, LOW);
   Serial.println("MOTORS STOPPED");
+  setupDistance();
   setupMotor();
   stopMotors();
   Serial2.begin(115200, SERIAL_8N1, 16, 17); // RX2 = 16, TX2 = 17
@@ -471,6 +470,7 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  updateDistanceSensors();
 
   if (currentState != lastState) {
     tft.fillScreen(TFT_WHITE);
@@ -492,6 +492,11 @@ void loop() {
         break;
       }
       case SEARCH:
+      {
+        drawFaceScreen(FACE_TRASH);
+        break;
+      }
+      case TRASH:
       {
         drawFaceScreen(FACE_TRASH);
         break;
@@ -583,7 +588,6 @@ void loop() {
       /* Add trash code in here 
          Extra movement states etc can be spread around
          Make sure that it can come out */
-
       if (Serial2.available()) {
         String msg = Serial2.readStringUntil('\n');
         msg.trim();
@@ -603,66 +607,78 @@ void loop() {
         }
         else{
             digitalWrite(LED_PIN, LOW);
-            /*
-            rotateMotorsL();
-            delay(1000);
-            rotateMotorsR();
-            delay(2000);
-            rotateMotorsL();
-            delay(1000);
-            */
-
             // Skip both if Lcnt > 3 and Rcnt > 5
             // Turn left 3 times
-            if (Lcnt < 3) {
+            if (Lcnt < 4 && Rcnt == 0) {
+              Serial.println("TURNING LEFT");
               rotateMotorsL();
               delay(250);
               stopMotors();
               Lcnt++; // Increment turn left count
               currentState = SEARCH;
-              break;
             }
-            // Turn right 4 times
-            if (Rcnt < 5) {
+            // Turn right 5 times
+            else if (Lcnt == 3 && Rcnt < 6) {
+              Serial.println("TURNING RIGHT");
               rotateMotorsR();
               delay(250);
               stopMotors();
               Rcnt++; // Increment turn right count
               currentState = SEARCH;
-              break;
             }
             // This might break here...
-            // Increment sweep only once Lcnt > 3 and Rcnt > 5 meaning full sweep
-            sweepCnt++;
-            // Reset position
-            rotateMotorsL();
-            delay(750);
-            stopMotors();
+            // Increment sweep only once Lcnt = 3 and Rcnt = 5 meaning full sweep
+            else if (Lcnt == 3 && Rcnt == 5) {
+              Rcnt = 0;
+              Lcnt = 0;
+              sweepCnt++;
+            }
 
-            if (sweepCnt == 5) {
+            else if (sweepCnt == 5) {
               Rcnt = 0;
               Lcnt = 0;
               currentState = STOP;
             }
             else {
+              // Reset position 
+              rotateMotorsL();
+              delay(500);
+              stopMotors();
               currentState = SEARCH;
             }
         }
-
-      break;
+        break;
       }
     }
 
     case TRASH:
     {
       moveForward();
-      Serial.println("MOVE FORWARD 3 SEC");
-      delay(3000);
       
-      currentState = STOP;
+      Serial.println("GETTING TRASH...");
+      // Go forward until object detected
+      if (objectDetected()){
+        currentState = EDGE;
+      }
+      // If no trash keep going forward
+      else {
+        currentState = TRASH;
+      }
       break;
     }
 
+    case EDGE:
+    {
+      moveForward();
+      // If any edge detected stop
+      if (anyEdgeDetected()){
+        currentState = STOP;
+      }
+      else {
+        currentState = EDGE;
+      }
+      break;
+    }
     case STOP:
     {
       stopMotors();
