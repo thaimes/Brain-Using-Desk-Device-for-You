@@ -20,7 +20,7 @@ except Exception:
 
 # Config 
 BASE_W, BASE_H = 2560, 1440  # Your design reference size
-ASSETS = r"asset path" # Replace with asset PATH file location
+ASSETS = r"path_here" # Replace with asset PATH file location
 BG_PATH = os.path.join(ASSETS, "background.png")
 CARD_PATH = os.path.join(ASSETS, "title.png")   # your wide pill card art
 MASCOT_PATH = os.path.join(ASSETS, "mascot.png")
@@ -607,6 +607,7 @@ def upload_audio():
                     print(f"[KEYWORD DETECTED]: {kw}")
                     if kw == "question":
                         questionflag = True
+                    last_transcript = ""
                     voice_queue.put(kw)  # push to Tk
                     return kw, 200
 
@@ -629,7 +630,7 @@ def run_flask():
     # threaded=True so multiple uploads don't block; no reloader to avoid extra processes
     flask_app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False, threaded=True)
 
-# ---------------- Voice → GUI Bridge ----------------
+# Voice → GUI Bridge 
 def show_time():
     from datetime import datetime
     messagebox.showinfo("Time", f"Current time: {datetime.now().strftime('%I:%M %p')}")
@@ -680,5 +681,4 @@ poll_voice_events()
 
 # Initial paint + Tk main loop
 draw_scene()
-
 root.mainloop()
