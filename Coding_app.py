@@ -1,4 +1,4 @@
-import os, ctypes, io, sys, calendar, threading
+import os, ctypes, io, sys, calendar, threading, json
 from datetime import date
 from queue import Queue, Empty
 
@@ -6,6 +6,7 @@ from google import genai
 from flask import Flask, request
 import requests
 import speech_recognition as sr
+from pathlib import Path
 
 # ---- Tk / GUI ----
 import tkinter as tk
@@ -20,13 +21,15 @@ except Exception:
 
 # Config 
 BASE_W, BASE_H = 2560, 1440  # Your design reference size
-ASSETS = r"path_here" # Replace with asset PATH file location
+NOTES_PATH = Path("calendar_notes.json")  # save next to your script
+ASSETS = r"PATH HERE" # Replace with asset PATH file location
 BG_PATH = os.path.join(ASSETS, "background.png")
 CARD_PATH = os.path.join(ASSETS, "title.png")   # your wide pill card art
 MASCOT_PATH = os.path.join(ASSETS, "mascot.png")
+lessons_win = None
 
 # Gemini configuration
-API_KEY = "GEMINI_KEY"
+API_KEY = "****************************"
 client = genai.Client(api_key = API_KEY)
 questionflag = False
 last_transcript = None
@@ -35,7 +38,7 @@ last_response = None
 # Global flask messages
 learning = False
 message_queue = Queue()
-BUDDY_IP = "http://BUDDY_IP" # replace with BUDDY's IP
+BUDDY_IP = "http://**********" # replace with BUDDY's IP
 
 #10-lesson path (toward tank control)
 # Hide solutions (use scaffolds instead of solved starters)
@@ -327,6 +330,7 @@ def open_sandbox():
     tk.Button(row, text="Clear", font=("Segoe UI", 12), command=lambda: output.delete("1.0","end")).grid(row=10, column=1, padx=6)
 
 def open_lesson(lesson_key):
+    global lessons_win
     L = LESSONS[lesson_key]
     win = tk.Toplevel(root)
     win.title(lesson_key)
@@ -365,7 +369,9 @@ def open_lesson(lesson_key):
         try:
             if L["check"](out):
                 messagebox.showinfo("Great job!", L["success"])
-                #Close this lesson window and return to the lessons list
+                lessons_win.lift()
+                lessons_win.focus_force()
+                # Close this lesson window and return to the lessons list
                 win.destroy()
         except Exception:
             pass
@@ -380,15 +386,20 @@ def open_lesson(lesson_key):
           ).grid(row=0, column=1, padx=6)
 
 def open_lessons():
-    win = tk.Toplevel(root)
+    global lessons_win
+    lessons_win = tk.Toplevel(root)
+    win = lessons_win
     win.title("Lessons")
     win.geometry("760x600")
 
-    try:
-        requests.get(f"{BUDDY_IP}/flag/on", timeout=2)
-        print("LEARN MODE ON")
-    except Exception as e:
-        print(f"Error sending flag on: {e}")
+    win.after(10, lambda: send_learn_flag())
+
+    def send_learn_flag():
+        try:
+            requests.get(f"{BUDDY_IP}/flag/on", timeout=2)
+            print("LEARN MODE ON")
+        except Exception as e:
+            print(f"Error sending flag on: {e}")
 
     def on_close():
         try:
@@ -399,6 +410,9 @@ def open_lessons():
         win.destroy()
 
     win.protocol("WM_DELETE_WINDOW", on_close)
+
+    win.lift()
+    win.focus_force()
 
     tk.Label(win, text="Start here!The basics", font=("Segoe UI", 20)).pack(pady=(10, 6))
 
@@ -421,12 +435,34 @@ def open_lessons():
                   command=lambda n=name: open_lesson(n)).pack(anchor="e", pady=(2, 0))
 
 def open_calendar():
+    # --- helpers for persistence ---
+    def load_notes():
+        if NOTES_PATH.exists():
+            try:
+                raw = json.load(NOTES_PATH.open("r", encoding="utf-8"))
+                # convert {"YYYY-MM-DD": "text"} -> {date(...): "text"}
+                return {date.fromisoformat(k): v for k, v in raw.items() if v.strip()}
+            except Exception:
+                return {}
+        return {}
+
+    def save_notes():
+        try:
+            # convert {date(...): "text"} -> {"YYYY-MM-DD": "text"}
+            raw = {k.isoformat(): v for k, v in notes.items() if v.strip()}
+            json.dump(raw, NOTES_PATH.open("w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        except Exception:
+            # fail silently; you could log/print if you prefer
+            pass
+
     win = tk.Toplevel(root)
     win.title("Calendar")
     win.geometry("640x560")
 
     cur = {"y": date.today().year, "m": date.today().month}
     notes = {}
+    notes = load_notes()
+
     header = tk.Frame(win); header.pack(fill="x", pady=(8,4))
     btn_prev = tk.Button(header, text="◀", width=3)
     btn_next = tk.Button(header, text="▶", width=3)
@@ -454,9 +490,12 @@ def open_calendar():
                     tk.Label(top, text=f"{dd:%A, %B %d}", font=("Segoe UI", 14, "bold")).pack(pady=(10,4))
                     ent = tk.Text(top, width=40, height=6); ent.pack(padx=10, pady=10)
                     if dd in notes: ent.insert("1.0", notes[dd])
+
                     def save_note():
                         notes[dd] = ent.get("1.0","end-1c").strip()
+                        save_notes()   # save immediately
                         top.destroy(); rebuild()
+
                     tk.Button(top, text="Save", command=save_note).pack(pady=(0,10))
                 btn.configure(command=on_day)
             r += 1
@@ -471,7 +510,17 @@ def open_calendar():
         if cur["m"] == 12: cur["m"] = 1; cur["y"] += 1
         else: cur["m"] += 1
         rebuild()
+
+
+    # Save when the calendar window is closed via the [X]
+    def on_close():
+        save_notes()
+        win.destroy()
+
     btn_prev.config(command=prev_month); btn_next.config(command=next_month)
+    rebuild()
+    win.protocol("WM_DELETE_WINDOW", on_close)
+
     rebuild()
 
 #Draw / Scale Scene (your logic preserved) 
@@ -566,7 +615,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 UPLOAD_PATH = os.path.join(UPLOAD_FOLDER, "recording.wav")
 
 # Add any words you want to react to
-KEYWORDS = ["calendar", "question", "weather", "trash", "garbage", "time"]
+KEYWORDS = ["calendar", "question", "weather", "trash", "garbage", "junk", "time"]
 
 @flask_app.route("/", methods=["GET"])
 def index():
@@ -597,10 +646,11 @@ def upload_audio():
             text_lower = text.lower()
 
             if questionflag:
+                questionflag = False
                 gemini_response(text_lower)
                 last_transcript = text
                 show_info()
-                questionflag = False
+                return "question handled", 200
 
             for kw in KEYWORDS:
                 if kw in text_lower:
@@ -608,12 +658,15 @@ def upload_audio():
                     if kw == "question":
                         questionflag = True
                     last_transcript = ""
+                    if kw == "junk":
+                        kw = "trash"
                     voice_queue.put(kw)  # push to Tk
                     return kw, 200
 
             return "none", 200
 
     except sr.UnknownValueError:
+        questionflag = False
         return "Could not understand audio", 400
     except sr.RequestError as e:
         return f"SpeechRecognition API error: {e}", 500
@@ -645,10 +698,10 @@ def show_info():
     )
 
 
+
 def handle_keyword(kw: str):
     routing = {
         "calendar": open_calendar,
-        "question": show_info
     }
     cb = routing.get(kw)
     if cb:
